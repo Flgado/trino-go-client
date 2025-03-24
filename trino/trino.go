@@ -343,9 +343,8 @@ func newConn(dsn string) (*Conn, error) {
 		}
 	}
 
-	var httpClient = &http.Client{
-		Transport: &http.Transport{}, // Use a fresh transport per client.
-	}
+	var httpClient = http.DefaultClient
+
 	if clientKey := query.Get("custom_client"); clientKey != "" {
 		httpClient = getCustomClient(clientKey)
 		if httpClient == nil {
@@ -1002,7 +1001,7 @@ func (st *driverStmt) exec(ctx context.Context, args []driver.NamedValue) (*stmt
 
 	st.doneCh = make(chan struct{})
 	st.nextURIs = make(chan string)
-	st.httpResponses = make(chan *http.Response) // FOlgado
+	st.httpResponses = make(chan *http.Response)
 	st.queryResponses = make(chan queryResponse)
 	st.errors = make(chan error)
 	go func() {
