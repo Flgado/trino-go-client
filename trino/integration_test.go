@@ -89,8 +89,11 @@ var (
 
 func TestMain(m *testing.M) {
 	flag.Parse()
-	DefaultQueryTimeout = *integrationServerQueryTimeout
-	DefaultCancelQueryTimeout = *integrationServerQueryTimeout
+	// DefaultQueryTimeout = *integrationServerQueryTimeout
+	// DefaultCancelQueryTimeout = *integrationServerQueryTimeout
+
+	DefaultQueryTimeout = 2 * time.Minute
+	DefaultCancelQueryTimeout = 2 * time.Minute
 	if *trinoImageTagFlag == "" {
 		*trinoImageTagFlag = "latest"
 	}
@@ -187,26 +190,26 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 
-	if !*noCleanup && pool != nil {
-		if trinoResource != nil {
-			if err := pool.Purge(trinoResource); err != nil {
-				log.Fatalf("Could not purge resource: %s", err)
-			}
-		}
+	// if !*noCleanup && pool != nil {
+	// 	if trinoResource != nil {
+	// 		if err := pool.Purge(trinoResource); err != nil {
+	// 			log.Fatalf("Could not purge resource: %s", err)
+	// 		}
+	// 	}
 
-		if localStackResource != nil {
-			if err := pool.Purge(localStackResource); err != nil {
-				log.Fatalf("Could not purge LocalStack resource: %s", err)
-			}
-		}
+	// 	if localStackResource != nil {
+	// 		if err := pool.Purge(localStackResource); err != nil {
+	// 			log.Fatalf("Could not purge LocalStack resource: %s", err)
+	// 		}
+	// 	}
 
-		networkExists, networkID, err := networkExists(pool, TrinoNetwork)
-		if err == nil && networkExists {
-			if err := pool.Client.RemoveNetwork(networkID); err != nil {
-				log.Fatalf("Could not remove Docker network: %s", err)
-			}
-		}
-	}
+	// 	networkExists, networkID, err := networkExists(pool, TrinoNetwork)
+	// 	if err == nil && networkExists {
+	// 		if err := pool.Client.RemoveNetwork(networkID); err != nil {
+	// 			log.Fatalf("Could not remove Docker network: %s", err)
+	// 		}
+	// 	}
+	// }
 
 	os.Exit(code)
 }
@@ -1695,5 +1698,48 @@ func TestIntegrationSelectTpchSpoolingSegments(t *testing.T) {
 				t.Fatalf("Expected %d rows, got %d", tt.expected, count)
 			}
 		})
+	}
+}
+
+func TestSpoolingIntegrationOrderedResults(t *testing.T) {
+	db := integrationOpen(t)
+	defer db.Close()
+
+	query := `
+		SELECT *
+		FROM TABLE(sequence(
+			start => 1,
+			stop => 5000000
+		))
+		ORDER BY sequential_number
+	`
+
+	rows, err := db.Query(query, sql.Named(trinoEncoding, "json"))
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	defer rows.Close()
+
+	expected := 1
+	var actual int
+
+	for rows.Next() {
+		err = rows.Scan(&actual)
+		if err != nil {
+			t.Fatalf("Row scan failed: %v", err)
+		}
+
+		if actual != expected {
+			t.Fatalf("Unexpected number at position %d: got %d, expected %d", expected, actual, expected)
+		}
+		expected++
+	}
+
+	if rows.Err() != nil {
+		t.Fatalf("Rows iteration error: %v", rows.Err())
+	}
+
+	if expected != 5_000_001 {
+		t.Fatalf("Expected 10,000,000 rows, got %d", expected-1)
 	}
 }
