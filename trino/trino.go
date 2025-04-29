@@ -157,6 +157,9 @@ const (
 
 	mapKeySeparator   = ":"
 	mapEntrySeparator = ";"
+
+	SpoolingDownloadWorkers = "SpoolingDownloadWorkers"
+	SpoolingDecodersWorkers = "SpoolingDecodersWorkers"
 )
 
 var (
@@ -706,6 +709,8 @@ type driverStmt struct {
 	spooledSegmentsMetadata     chan spooledMetadata
 	spooledSegmentToDecode      chan segmentToDecode
 	decodedSegment              chan decodedSegment
+	numberOfDownloadWorkers     int
+	numberOfDecodersWorkers     int
 	waitSegmentDecodersWorkers  sync.WaitGroup
 	waitDownloadSegmentsWorkers sync.WaitGroup
 	startSpoolingWorkersOnce    sync.Once
@@ -730,19 +735,30 @@ type decodedSegment struct {
 
 func (st *driverStmt) startSpoolingProtocolWorkers(ctx context.Context) {
 	st.usingSpooledProtocol = true
-	st.spoolingProcesserDone = make(chan struct{})
+	if st.numberOfDecodersWorkers == 0 {
+		st.numberOfDecodersWorkers = DefaultSpoolingDecodersWorkers
+	}
+
+	if st.numberOfDownloadWorkers == 0 {
+		st.numberOfDownloadWorkers = DefaultSpoolingDownloadWorkers
+	}
+
 	downloadSegmentsCtx, cancelDownloadWorkers := context.WithTimeout(context.WithoutCancel(ctx), DefaultCancelQueryTimeout)
 	st.cancelDownloadWorkers = cancelDownloadWorkers
 	decodeSegmentCtx, cancelDecodersWorkers := context.WithTimeout(context.WithoutCancel(ctx), DefaultCancelQueryTimeout)
 	st.cancelDecodersWorkers = cancelDecodersWorkers
+
 	st.spooledSegmentsMetadata = make(chan spooledMetadata)
 	st.spooledSegmentToDecode = make(chan segmentToDecode)
+	st.spoolingProcesserDone = make(chan struct{})
+	st.decodedSegment = make(chan decodedSegment)
+
 	st.startDownloadSegmentsWorkers(downloadSegmentsCtx)
 	st.startSegmentsDecodersWorkers(decodeSegmentCtx)
 }
 
 func (st *driverStmt) startDownloadSegmentsWorkers(ctx context.Context) {
-	for i := 0; i < DefaultSpoolingDownloadWorkers; i++ {
+	for i := 0; i < st.numberOfDownloadWorkers; i++ {
 		st.waitDownloadSegmentsWorkers.Add(1)
 		go func() {
 			defer st.waitDownloadSegmentsWorkers.Done()
@@ -784,7 +800,7 @@ func (st *driverStmt) startDownloadSegmentsWorkers(ctx context.Context) {
 }
 
 func (st *driverStmt) startSegmentsDecodersWorkers(ctx context.Context) {
-	for i := 0; i < DefaultSpoolingDecodersWorkers; i++ {
+	for i := 0; i < st.numberOfDecodersWorkers; i++ {
 		st.waitSegmentDecodersWorkers.Add(1)
 		go func() {
 			defer st.waitSegmentDecodersWorkers.Done()
@@ -862,15 +878,21 @@ func (st *driverStmt) Close() error {
 		st.cancelDecodersWorkers()
 	}
 
+	if !st.allSegmentsProccess && st.decodedSegment != nil {
+		close(st.decodedSegment)
+	}
+
 	st.waitSegmentDecodersWorkers.Wait()
 
 	close(st.nextURIs)
 	close(st.errors)
+
 	st.doneCh = nil
 	st.cancelDownloadWorkers = nil
 	st.spooledSegmentsMetadata = nil
 	st.spooledSegmentToDecode = nil
 	st.cancelDecodersWorkers = nil
+
 	return nil
 }
 
@@ -1095,6 +1117,14 @@ func (st *driverStmt) exec(ctx context.Context, args []driver.NamedValue) (*stmt
 				continue
 			}
 
+			if arg.Name == SpoolingDownloadWorkers {
+				st.numberOfDownloadWorkers = arg.Value.(int)
+			}
+
+			if arg.Name == SpoolingDecodersWorkers {
+				st.numberOfDecodersWorkers = arg.Value.(int)
+			}
+
 			s, err := Serial(arg.Value)
 			if err != nil {
 				return nil, err
@@ -1161,7 +1191,6 @@ func (st *driverStmt) exec(ctx context.Context, args []driver.NamedValue) (*stmt
 
 	st.doneCh = make(chan struct{})
 	st.nextURIs = make(chan string)
-	st.decodedSegment = make(chan decodedSegment)
 	st.httpResponses = make(chan *http.Response)
 	st.queryResponses = make(chan queryResponse)
 	st.errors = make(chan error)
@@ -1826,38 +1855,7 @@ func (qr *driverRows) fetch() error {
 					return io.EOF
 				}
 
-				spoolingDecodersWorkersDone, spoolingFetcherWorkersDone := qr.stmt.waitForSpoolingWorkers()
-
-				qr.nextURI = ""
-
-				for {
-					select {
-					case qr.stmt.spooledSegmentsMetadata <- spooledMetadata{}:
-						// signal no more segments to fetch
-					case <-spoolingFetcherWorkersDone:
-						select {
-						case qr.stmt.spooledSegmentToDecode <- segmentToDecode{}:
-							// signal no more segments to decode
-						default:
-						}
-					case <-spoolingDecodersWorkersDone:
-						select {
-						case <-qr.stmt.decodedSegment:
-							// channel is closed nothing to do
-						default:
-							qr.stmt.allSegmentsProccess = true
-							close(qr.stmt.decodedSegment)
-						}
-					case err := <-qr.stmt.errors:
-						qr.stmt.cancelDecodersWorkers()
-						qr.stmt.cancelDownloadWorkers()
-						qr.err = err
-						return err
-
-					case <-qr.stmt.spoolingProcesserDone:
-						return nil
-					}
-				}
+				return qr.waitForAllSpoolingWorkersFinish()
 			}
 
 			err = qr.initColumns(&qresp)
@@ -1879,63 +1877,9 @@ func (qr *driverRows) fetch() error {
 				}
 			case map[string]interface{}:
 				// spooling protocol
-				qr.stmt.startSpoolingWorkersOnce.Do(func() {
-					qr.stmt.startSpoolingProtocolWorkers(qr.ctx)
-					qr.startSegmentProcessor()
-				})
-				encoding, ok := data["encoding"].(string)
-				if !ok {
-					return fmt.Errorf("invalid or missing 'encoding' field on spooling protocol, expected string")
-				}
-
-				segments, ok := data["segments"].([]interface{})
-				if !ok {
-					return fmt.Errorf("invalid or missing 'segments' field on spooling protocol, expected []interface{}")
-				}
-
-				for segmentIndex, segment := range segments {
-					segment, ok := segment.(map[string]interface{})
-					if !ok {
-						return fmt.Errorf("segment at index %d is invalid: expected map[string]interface{}, got %T", segmentIndex, segment)
-					}
-					segmentMetadata, exists := segment["metadata"]
-					if !exists {
-						return fmt.Errorf("metadata is missing in segment at index %d", segmentIndex)
-					}
-
-					typedMetadata, ok := segmentMetadata.(map[string]interface{})
-					if !ok {
-						return fmt.Errorf("metadata is invalid or cannot be parsed as map[string]interface{} in segment at index %d", segmentIndex)
-					}
-
-					metadata, err := parseSpoolingMetadata(typedMetadata)
-
-					if err != nil {
-						return err
-					}
-					switch segment["type"] {
-					case "inline":
-						decodedBytes, err := base64.StdEncoding.DecodeString(segment["data"].(string))
-
-						if err != nil {
-							return fmt.Errorf("error decoding base64 data in inline segment at index %d: %v", segmentIndex, err)
-						}
-
-						qr.stmt.spooledSegmentToDecode <- segmentToDecode{
-							segmentIndex: segmentIndex,
-							encoding:     encoding,
-							data:         decodedBytes,
-							metadata:     metadata,
-						}
-
-					case "spooled":
-						spooledMetadata, err := parseSpooledMetadata(segment, segmentIndex, metadata, encoding)
-						if err != nil {
-							return err
-						}
-
-						qr.stmt.spooledSegmentsMetadata <- spooledMetadata
-					}
+				err := qr.fetchSpoolingSegmets(data)
+				if err != nil {
+					return err
 				}
 			case nil:
 				if !qr.stmt.usingSpooledProtocol {
@@ -1961,6 +1905,104 @@ func (qr *driverRows) fetch() error {
 			return err
 		}
 	}
+}
+
+func (qr *driverRows) waitForAllSpoolingWorkersFinish() error {
+	spoolingDecodersWorkersDone, spoolingFetcherWorkersDone := qr.stmt.waitForSpoolingWorkers()
+
+	qr.nextURI = ""
+
+	for {
+		select {
+		case qr.stmt.spooledSegmentsMetadata <- spooledMetadata{}:
+			// signal no more segments to fetch
+		case <-spoolingFetcherWorkersDone:
+			select {
+			case qr.stmt.spooledSegmentToDecode <- segmentToDecode{}:
+				// signal no more segments to decode
+			default:
+			}
+		case <-spoolingDecodersWorkersDone:
+			select {
+			case <-qr.stmt.decodedSegment:
+				// channel is closed nothing to do
+			default:
+				qr.stmt.allSegmentsProccess = true
+				close(qr.stmt.decodedSegment)
+			}
+		case err := <-qr.stmt.errors:
+			qr.stmt.cancelDecodersWorkers()
+			qr.stmt.cancelDownloadWorkers()
+			qr.err = err
+			return err
+
+		case <-qr.stmt.spoolingProcesserDone:
+			return nil
+		}
+	}
+}
+
+func (qr *driverRows) fetchSpoolingSegmets(data map[string]interface{}) error {
+	qr.stmt.startSpoolingWorkersOnce.Do(func() {
+		qr.stmt.startSpoolingProtocolWorkers(qr.ctx)
+		qr.startSegmentProcessor()
+	})
+	encoding, ok := data["encoding"].(string)
+	if !ok {
+		return fmt.Errorf("invalid or missing 'encoding' field on spooling protocol, expected string")
+	}
+
+	segments, ok := data["segments"].([]interface{})
+	if !ok {
+		return fmt.Errorf("invalid or missing 'segments' field on spooling protocol, expected []interface{}")
+	}
+
+	for segmentIndex, segment := range segments {
+		segment, ok := segment.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("segment at index %d is invalid: expected map[string]interface{}, got %T", segmentIndex, segment)
+		}
+		segmentMetadata, exists := segment["metadata"]
+		if !exists {
+			return fmt.Errorf("metadata is missing in segment at index %d", segmentIndex)
+		}
+
+		typedMetadata, ok := segmentMetadata.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("metadata is invalid or cannot be parsed as map[string]interface{} in segment at index %d", segmentIndex)
+		}
+
+		metadata, err := parseSpoolingMetadata(typedMetadata)
+
+		if err != nil {
+			return err
+		}
+		switch segment["type"] {
+		case "inline":
+			decodedBytes, err := base64.StdEncoding.DecodeString(segment["data"].(string))
+
+			if err != nil {
+				return fmt.Errorf("error decoding base64 data in inline segment at index %d: %v", segmentIndex, err)
+			}
+
+			qr.stmt.spooledSegmentToDecode <- segmentToDecode{
+				segmentIndex: segmentIndex,
+				encoding:     encoding,
+				data:         decodedBytes,
+				metadata:     metadata,
+			}
+
+		case "spooled":
+			spooledMetadata, err := parseSpooledMetadata(segment, segmentIndex, metadata, encoding)
+			if err != nil {
+				return err
+			}
+
+			qr.stmt.spooledSegmentsMetadata <- spooledMetadata
+		}
+	}
+
+	return nil
 }
 
 func (st *driverStmt) waitForSpoolingWorkers() (decodersDone <-chan struct{}, fetchersDone <-chan struct{}) {
