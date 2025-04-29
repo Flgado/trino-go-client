@@ -1169,22 +1169,22 @@ func TestSpoolingProtocolSpooledSegmentDecoders(t *testing.T) {
 		Encoding       string
 		DownloadedData []byte
 	}{
-		// {
-		// 	Name: "noCompression",
-		// 	Segments: []map[string]interface{}{
-		// 		{
-		// 			"type":     "spooled",
-		// 			"metadata": map[string]interface{}{"segmentSize": 16, "rowOffset": 0, "rowsCount": 2},
-		// 			"ackUri":   "test",
-		// 			"headers": map[string]interface{}{
-		// 				"test": []interface{}{"test"},
-		// 			},
-		// 		},
-		// 	},
-		// 	Encoding:       "json",
-		// 	ExpectedResult: []int{1000, 10001},
-		// 	DownloadedData: []byte("[[1000],[10001]]"),
-		// },
+		{
+			Name: "noCompression",
+			Segments: []map[string]interface{}{
+				{
+					"type":     "spooled",
+					"metadata": map[string]interface{}{"segmentSize": 16, "rowOffset": 0, "rowsCount": 2},
+					"ackUri":   "test",
+					"headers": map[string]interface{}{
+						"test": []interface{}{"test"},
+					},
+				},
+			},
+			Encoding:       "json",
+			ExpectedResult: []int{1000, 10001},
+			DownloadedData: []byte("[[1000],[10001]]"),
+		},
 		{
 			Name: "zstdCompression",
 			Segments: []map[string]interface{}{

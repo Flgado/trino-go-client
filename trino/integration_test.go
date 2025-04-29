@@ -90,11 +90,8 @@ var (
 
 func TestMain(m *testing.M) {
 	flag.Parse()
-	// DefaultQueryTimeout = *integrationServerQueryTimeout
-	// DefaultCancelQueryTimeout = *integrationServerQueryTimeout
-
-	DefaultQueryTimeout = 2 * time.Minute
-	DefaultCancelQueryTimeout = 2 * time.Minute
+	DefaultQueryTimeout = *integrationServerQueryTimeout
+	DefaultCancelQueryTimeout = *integrationServerQueryTimeout
 	if *trinoImageTagFlag == "" {
 		*trinoImageTagFlag = "latest"
 	}
@@ -1743,6 +1740,6 @@ func TestSpoolingIntegrationOrderedResults(t *testing.T) {
 	}
 
 	if expected != 5_000_001 {
-		t.Fatalf("Expected 10,000,000 rows, got %d", expected-1)
+		t.Fatalf("Expected 5,000,000 rows, got %d", expected-1)
 	}
 }
