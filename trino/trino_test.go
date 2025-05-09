@@ -1408,6 +1408,7 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 		expectedError                 string
 		downloadedData                []byte
 		downloadedDataStatusCodeError bool
+		checkErrorOnQuery             bool
 	}{
 		{
 			name: "MissingRowOffsetMetadata",
@@ -1421,7 +1422,8 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 					},
 				},
 			},
-			expectedError: "rowOffset is missing in segment metadata",
+			expectedError:     "rowOffset is missing in segment metadata",
+			checkErrorOnQuery: true,
 		},
 		{
 			name: "WrongRowOffsetMetadataType",
@@ -1435,7 +1437,8 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 					},
 				},
 			},
-			expectedError: "invalid type for rowOffset in segment metadata, expected json.Number",
+			expectedError:     "invalid type for rowOffset in segment metadata, expected json.Number",
+			checkErrorOnQuery: true,
 		},
 		{
 			name: "MissingSegmentSizeMetadata",
@@ -1449,7 +1452,8 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 					},
 				},
 			},
-			expectedError: "segmentSize is missing in segment metadata",
+			expectedError:     "segmentSize is missing in segment metadata",
+			checkErrorOnQuery: true,
 		},
 		{
 			name: "WrongSegmentSizeMetadataType",
@@ -1463,7 +1467,8 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 					},
 				},
 			},
-			expectedError: "invalid type for segmentSize in segment metadata, expected json.Number",
+			expectedError:     "invalid type for segmentSize in segment metadata, expected json.Number",
+			checkErrorOnQuery: true,
 		},
 		{
 			name: "MissingMetadata",
@@ -1476,7 +1481,8 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 					},
 				},
 			},
-			expectedError: "metadata is missing in segment at index 0",
+			expectedError:     "metadata is missing in segment at index 0",
+			checkErrorOnQuery: true,
 		},
 		{
 			name: "WrongMetadataType",
@@ -1490,7 +1496,8 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 					},
 				},
 			},
-			expectedError: "metadata is invalid or cannot be parsed as map[string]interface{} in segment at index 0",
+			expectedError:     "metadata is invalid or cannot be parsed as map[string]interface{} in segment at index 0",
+			checkErrorOnQuery: true,
 		},
 		{
 			name: "WrongUncompressSize",
@@ -1541,7 +1548,8 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 					},
 				},
 			},
-			expectedError: "missing or invalid 'uri' field in spooled segment at index 0",
+			expectedError:     "missing or invalid 'uri' field in spooled segment at index 0",
+			checkErrorOnQuery: true,
 		},
 		{
 			name: "MissingUriAck",
@@ -1562,7 +1570,8 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 					},
 				},
 			},
-			expectedError: "missing or invalid 'ackUri' field in spooled segment at index 0",
+			expectedError:     "missing or invalid 'ackUri' field in spooled segment at index 0",
+			checkErrorOnQuery: true,
 		},
 		{
 			name: "MissingHeaders",
@@ -1579,7 +1588,8 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 					},
 				},
 			},
-			expectedError: "missing or invalid 'headers' field in spooled segment at index 0",
+			expectedError:     "missing or invalid 'headers' field in spooled segment at index 0",
+			checkErrorOnQuery: true,
 		},
 		{
 			name: "HeadersWithMultipleValues",
@@ -1720,7 +1730,22 @@ func TestSpoolingProtocolSpooledSegmentErrorHandling(t *testing.T) {
 			require.NoError(t, err)
 			defer db.Close()
 
-			_, err = db.Query("SELECT 1")
+			rows, err := db.Query("SELECT 1")
+
+			if tc.checkErrorOnQuery {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.expectedError)
+				return
+			}
+
+			require.NoError(t, err)
+			defer rows.Close()
+
+			for rows.Next() {
+				// force segment processing
+			}
+
+			err = rows.Err()
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.expectedError)
 		})
@@ -1805,7 +1830,14 @@ func TestSpoolingProtocolInlineSegmentErrorHandling(t *testing.T) {
 			require.NoError(t, err)
 			defer db.Close()
 
-			_, err = db.Query("SELECT 1")
+			rows, err := db.Query("SELECT 1")
+			require.NoError(t, err)
+
+			for rows.Next() {
+				// force segment processing
+			}
+
+			err = rows.Err()
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.expectedError)
 		})
