@@ -1412,6 +1412,11 @@ func (qr *driverRows) Next(dest []driver.Value) error {
 			qr.rowindex = 0
 
 		case err := <-qr.stmt.errors:
+			if err == nil {
+				err = io.EOF
+			} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				qr.Close()
+			}
 			qr.stmt.cancelDecodersWorkers()
 			qr.stmt.cancelDownloadWorkers()
 			qr.err = err
@@ -1919,6 +1924,7 @@ func (qr *driverRows) proccessSpollingSegments() {
 				err = qr.initColumns(&qresp)
 				if err != nil {
 					qr.stmt.errors <- err
+					return
 				}
 
 				switch data := qresp.Data.(type) {
@@ -1931,16 +1937,6 @@ func (qr *driverRows) proccessSpollingSegments() {
 				}
 				qr.rowsAffected = qresp.UpdateCount
 				qr.scheduleProgressUpdate(qresp.ID, qresp.Stats)
-			case err = <-qr.stmt.errors:
-				if err == nil {
-					// Channel was closed, which means the statement
-					// or rows were closed.
-					err = io.EOF
-				} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					qr.Close()
-				}
-				qr.err = err
-				return
 			}
 		}
 	}()
