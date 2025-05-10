@@ -765,7 +765,7 @@ func (st *driverStmt) Close() error {
 	}
 
 	if st.spoolingRowsChannel != nil {
-		for range <-st.spoolingRowsChannel {
+		for range st.spoolingRowsChannel {
 		}
 	}
 
@@ -1090,7 +1090,6 @@ func (st *driverStmt) exec(ctx context.Context, args []driver.NamedValue) (*stmt
 	st.httpResponses = make(chan *http.Response)
 	st.queryResponses = make(chan queryResponse)
 	st.errors = make(chan error)
-
 	go func() {
 		defer close(st.httpResponses)
 		for {
