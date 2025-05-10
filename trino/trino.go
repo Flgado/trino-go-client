@@ -1904,7 +1904,7 @@ func (st *driverStmt) startSegmentsDecodersWorkers(ctx context.Context) {
 						return
 					}
 
-					st.decodedSegment <- decodedSegment{ // folgado
+					st.decodedSegment <- decodedSegment{
 						rowOffset: segmentToDecode.metadata.rowOffset,
 						queryData: segment,
 					}
