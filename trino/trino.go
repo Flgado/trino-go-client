@@ -108,9 +108,9 @@ var (
 	// ErrInvalidProgressCallbackHeader indicates that server did not get valid headers for progress callback
 	ErrInvalidProgressCallbackHeader = errors.New("trino: both " + trinoProgressCallbackParam + " and " + trinoProgressCallbackPeriodParam + " must be set when using progress callback")
 
-	DefaultSpoolingDownloadWorkers = 4
+	DefaultSpoolingDownloadWorkers = 50
 
-	DefaultSpoolingDecodersWorkers = 4
+	DefaultSpoolingDecodersWorkers = 50
 )
 
 const (
@@ -710,6 +710,7 @@ type driverStmt struct {
 	waitDownloadSegmentsWorkers sync.WaitGroup
 	cancelDownloadWorkers       context.CancelFunc
 	cancelDecodersWorkers       context.CancelFunc
+	spoolingRowsChannel         chan []queryData
 	spoolingProcesserDone       chan struct{}
 	errors                      chan error
 	doneCh                      chan struct{}
@@ -749,6 +750,7 @@ func (st *driverStmt) Close() error {
 		for range st.errors {
 		}
 	}()
+
 	for range st.queryResponses {
 	}
 	for range st.httpResponses {
@@ -762,13 +764,23 @@ func (st *driverStmt) Close() error {
 		st.cancelDecodersWorkers()
 	}
 
-	if st.spooledSegmentsMetadata != nil {
-		for range st.spooledSegmentsMetadata {
+	if st.spoolingRowsChannel != nil {
+		for range <-st.spoolingRowsChannel {
+		}
+	}
+
+	if st.decodedSegment != nil {
+		for range st.decodedSegment {
 		}
 	}
 
 	if st.spooledSegmentToDecode != nil {
 		for range st.spooledSegmentToDecode {
+		}
+	}
+
+	if st.spooledSegmentsMetadata != nil {
+		for range st.spooledSegmentsMetadata {
 		}
 	}
 
@@ -1305,7 +1317,6 @@ type driverRows struct {
 	columns      []string
 	coltype      []*typeConverter
 	data         []queryData
-	rowChannel   chan []queryData
 	rowsAffected int64
 
 	statsCh chan QueryProgressInfo
@@ -1403,7 +1414,7 @@ func (qr *driverRows) Next(dest []driver.Value) error {
 	} else if qr.stmt.usingSpooledProtocol && (qr.rowindex >= len(qr.data) || qr.data == nil) {
 		var ok bool
 		select {
-		case qr.data, ok = <-qr.rowChannel:
+		case qr.data, ok = <-qr.stmt.spoolingRowsChannel:
 			if !ok {
 				qr.err = io.EOF
 				return qr.err
@@ -1699,10 +1710,9 @@ func handleResponseError(status int, respErr ErrTrino) error {
 }
 
 func (qr *driverRows) startSegmentProcessor() {
-	qr.rowChannel = make(chan []queryData)
-
+	qr.stmt.spoolingRowsChannel = make(chan []queryData)
 	go func() {
-		defer close(qr.rowChannel)
+		defer close(qr.stmt.spoolingRowsChannel)
 		defer close(qr.stmt.spoolingProcesserDone)
 
 		buffer := make(map[int64][]queryData)
@@ -1719,7 +1729,7 @@ func (qr *driverRows) startSegmentProcessor() {
 						}
 
 						select {
-						case qr.rowChannel <- data:
+						case qr.stmt.spoolingRowsChannel <- data:
 						case <-qr.doneCh:
 							return
 						}
@@ -1739,7 +1749,7 @@ func (qr *driverRows) startSegmentProcessor() {
 					}
 
 					select {
-					case qr.rowChannel <- data:
+					case qr.stmt.spoolingRowsChannel <- data:
 					case <-qr.doneCh:
 						return
 					}
@@ -1831,8 +1841,8 @@ func (st *driverStmt) startSpoolingProtocolWorkers(ctx context.Context) {
 }
 
 func (st *driverStmt) startDownloadSegmentsWorkers(ctx context.Context) {
+	st.waitDownloadSegmentsWorkers.Add(DefaultSpoolingDownloadWorkers)
 	for i := 0; i < DefaultSpoolingDownloadWorkers; i++ {
-		st.waitDownloadSegmentsWorkers.Add(1)
 		go func() {
 			defer st.waitDownloadSegmentsWorkers.Done()
 			for {
@@ -1874,8 +1884,8 @@ func (st *driverStmt) startDownloadSegmentsWorkers(ctx context.Context) {
 }
 
 func (st *driverStmt) startSegmentsDecodersWorkers(ctx context.Context) {
+	st.waitSegmentDecodersWorkers.Add(DefaultSpoolingDecodersWorkers)
 	for i := 0; i < DefaultSpoolingDecodersWorkers; i++ {
-		st.waitSegmentDecodersWorkers.Add(1)
 		go func() {
 			defer st.waitSegmentDecodersWorkers.Done()
 			for {
@@ -1889,12 +1899,12 @@ func (st *driverStmt) startSegmentsDecodersWorkers(ctx context.Context) {
 
 					segment, err := decodeSegment(segmentToDecode.data, segmentToDecode.encoding, segmentToDecode.metadata)
 					if err != nil {
-						st.errors <- fmt.Errorf("failed to decode spooled segment at index %d: %v", segmentToDecode.segmentIndex, err)
 						st.cancelDecodersWorkers()
+						st.errors <- fmt.Errorf("failed to decode spooled segment at index %d: %v", segmentToDecode.segmentIndex, err)
 						return
 					}
 
-					st.decodedSegment <- decodedSegment{
+					st.decodedSegment <- decodedSegment{ // folgado
 						rowOffset: segmentToDecode.metadata.rowOffset,
 						queryData: segment,
 					}
