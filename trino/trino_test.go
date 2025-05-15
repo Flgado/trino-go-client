@@ -203,6 +203,36 @@ func TestKerberosConfig(t *testing.T) {
 	assert.Equal(t, want, dsn)
 }
 
+func TestRolesConfig(t *testing.T) {
+	c := &Config{
+		ServerURI:         "https://foobar@localhost:8090",
+		SessionProperties: map[string]string{"query_priority": "1"},
+		Roles:             map[string]string{"catalog1": "role1", "catalog2": "role2"},
+	}
+
+	dsn, err := c.FormatDSN()
+	require.NoError(t, err)
+
+	want := "https://foobar@localhost:8090?roles=catalog1%3Drole1%3Bcatalog2%3Drole2&session_properties=query_priority%3A1&source=trino-go-client"
+
+	assert.Equal(t, want, dsn)
+}
+
+func TestDefaultRoleConfig(t *testing.T) {
+	c := &Config{
+		ServerURI:         "https://foobar@localhost:8090",
+		SessionProperties: map[string]string{"query_priority": "1"},
+		Roles:             "role1",
+	}
+
+	dsn, err := c.FormatDSN()
+	require.NoError(t, err)
+
+	want := "https://foobar@localhost:8090?roles=system%3Drole1&session_properties=query_priority%3A1&source=trino-go-client"
+
+	assert.Equal(t, want, dsn)
+}
+
 func TestInvalidKerberosConfig(t *testing.T) {
 	c := &Config{
 		ServerURI:       "http://foobar@localhost:8090",
@@ -1096,6 +1126,31 @@ func TestQueryCancellation(t *testing.T) {
 
 	_, err = db.Query("SELECT 1")
 	assert.EqualError(t, err, ErrQueryCancelled.Error(), "unexpected error")
+}
+
+func TestTrinoRoleHeaderSent(t *testing.T) {
+	var receivedHeader string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeader = r.Header.Get(trinoRoleHeader)
+	}))
+	t.Cleanup(ts.Close)
+
+	c := &Config{
+		ServerURI:         ts.URL,
+		SessionProperties: map[string]string{"query_priority": "1"},
+		Roles:             map[string]string{"catalog1": "role1", "catalog2": "role2"},
+	}
+
+	dsn, err := c.FormatDSN()
+	require.NoError(t, err)
+	db, err := sql.Open("trino", dsn)
+	require.NoError(t, err)
+
+	_, _ = db.Query("SHOW TABLES")
+	require.NoError(t, err)
+
+	assert.Equal(t, "catalog1=role1;catalog2=role2", receivedHeader, "expected X-Trino-Role header to be set")
 }
 
 func TestQueryFailure(t *testing.T) {
