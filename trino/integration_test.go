@@ -49,6 +49,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	dt "github.com/ory/dockertest/v3"
 	docker "github.com/ory/dockertest/v3/docker"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -1024,25 +1025,82 @@ func TestIntegrationNoResults(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-func TestRoleSupport(t *testing.T) {
-	config := Config{
-		ServerURI: *integrationServerFlag,
-		Roles:     map[string]string{"tpch": "role1"},
+func TestRoleHeaderSupport(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      Config
+		rawDSN      string
+		expectError bool
+		errorSubstr string
+	}{
+		{
+			name: "Valid roles via Config",
+			config: Config{
+				ServerURI: *integrationServerFlag,
+				Roles:     map[string]string{"tpch": "role1", "memory": "role2"},
+			},
+			expectError: false,
+		},
+		{
+			name:        "Valid single role via DSN",
+			rawDSN:      *integrationServerFlag + "?roles=tpch%3DROLE%7Brole1%7D",
+			expectError: false,
+		},
+		{
+			name: "Non-existent catalog role",
+			config: Config{
+				ServerURI: *integrationServerFlag,
+				Roles:     map[string]string{"not-exist-catalog": "role1"},
+			},
+			expectError: true,
+			errorSubstr: "USER_ERROR: Catalog 'not-exist-catalog' not found",
+		},
+		{
+			name:        "Invalid role format with colon",
+			rawDSN:      *integrationServerFlag + "?roles=not-exist-catalog%3Arole1",
+			expectError: true,
+			errorSubstr: "Invalid X-Trino-Role header",
+		},
+		{
+			name:        "Invalid role format missing ROLE{}",
+			rawDSN:      *integrationServerFlag + "?roles=catolog%3Drole1",
+			expectError: true,
+			errorSubstr: "Invalid X-Trino-Role header",
+		},
+		{
+			name:        "Invalid role format missing ROLE{}",
+			rawDSN:      *integrationServerFlag + "?roles=catolog%3Drole1",
+			expectError: true,
+			errorSubstr: "Invalid X-Trino-Role header",
+		},
 	}
 
-	dns, err := config.FormatDSN()
-	if err != nil {
-		t.Fatal(err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var dns string
+			var err error
 
-	db := integrationOpen(t, dns)
-	rows, err := db.Query("SELECT 1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for rows.Next() {
-		t.Fatal(errors.New("Rows returned"))
+			if tt.rawDSN != "" {
+				dns = tt.rawDSN
+			} else {
+				dns, err = tt.config.FormatDSN()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			db := integrationOpen(t, dns)
+			_, err = db.Query("SELECT 1")
+
+			if tt.expectError {
+				require.Error(t, err)
+				if tt.errorSubstr != "" {
+					require.Contains(t, err.Error(), tt.errorSubstr)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+		})
 	}
 }
 

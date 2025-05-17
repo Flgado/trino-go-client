@@ -203,34 +203,44 @@ func TestKerberosConfig(t *testing.T) {
 	assert.Equal(t, want, dsn)
 }
 
-func TestRolesConfig(t *testing.T) {
-	c := &Config{
-		ServerURI:         "https://foobar@localhost:8090",
-		SessionProperties: map[string]string{"query_priority": "1"},
-		Roles:             map[string]string{"catalog1": "role1", "catalog2": "role2"},
+func TestFormatDSNWithRoles(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      *Config
+		wantDSN     string
+		expectError bool
+	}{
+		{
+			name: "Multiple catalog roles",
+			config: &Config{
+				ServerURI:         "https://foobar@localhost:8090",
+				SessionProperties: map[string]string{"query_priority": "1"},
+				Roles:             map[string]string{"catalog1": "role1", "catalog2": "role2"},
+			},
+			wantDSN: "https://foobar@localhost:8090?roles=catalog1%3DROLE%7B%22role1%22%7D%2Ccatalog2%3DROLE%7B%22role2%22%7D&session_properties=query_priority%3A1&source=trino-go-client",
+		},
+		{
+			name: "Default system role as string",
+			config: &Config{
+				ServerURI:         "https://foobar@localhost:8090",
+				SessionProperties: map[string]string{"query_priority": "1"},
+				Roles:             "role1",
+			},
+			wantDSN: "https://foobar@localhost:8090?roles=system%3DROLE%7B%22role1%22%7D&session_properties=query_priority%3A1&source=trino-go-client",
+		},
 	}
 
-	dsn, err := c.FormatDSN()
-	require.NoError(t, err)
-
-	want := "https://foobar@localhost:8090?roles=catalog1%3Drole1%3Bcatalog2%3Drole2&session_properties=query_priority%3A1&source=trino-go-client"
-
-	assert.Equal(t, want, dsn)
-}
-
-func TestDefaultRoleConfig(t *testing.T) {
-	c := &Config{
-		ServerURI:         "https://foobar@localhost:8090",
-		SessionProperties: map[string]string{"query_priority": "1"},
-		Roles:             "role1",
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dsn, err := tt.config.FormatDSN()
+			if tt.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantDSN, dsn)
+			}
+		})
 	}
-
-	dsn, err := c.FormatDSN()
-	require.NoError(t, err)
-
-	want := "https://foobar@localhost:8090?roles=system%3Drole1&session_properties=query_priority%3A1&source=trino-go-client"
-
-	assert.Equal(t, want, dsn)
 }
 
 func TestInvalidKerberosConfig(t *testing.T) {

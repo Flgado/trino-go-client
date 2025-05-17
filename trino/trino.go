@@ -154,6 +154,7 @@ const (
 
 	mapKeySeparator   = ":"
 	mapEntrySeparator = ";"
+	mapCommaSeparator = ","
 	mapRolesSeparator = "="
 	sistemRole        = "system"
 )
@@ -302,7 +303,7 @@ func (c *Config) FormatDSN() (string, error) {
 		"extra_credentials":  strings.Join(credkv, mapEntrySeparator),
 		"custom_client":      c.CustomClientName,
 		accessTokenConfig:    c.AccessToken,
-		"roles":              strings.Join(roles, mapEntrySeparator),
+		"roles":              strings.Join(roles, mapCommaSeparator),
 	} {
 		if v != "" {
 			query[k] = []string{v}
