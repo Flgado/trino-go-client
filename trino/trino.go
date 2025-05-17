@@ -222,10 +222,10 @@ func (c *Config) FormatDSN() (string, error) {
 	var roles []string
 	if c.Roles != nil {
 		if v, ok := c.Roles.(string); ok {
-			roles = append(roles, sistemRole+mapRolesSeparator+v)
+			roles = append(roles, sistemRole+mapRolesSeparator+fmt.Sprintf("ROLE{%q}", v))
 		} else if v, ok := c.Roles.(map[string]string); ok {
 			for k, v := range v {
-				roles = append(roles, k+mapRolesSeparator+v)
+				roles = append(roles, k+mapRolesSeparator+fmt.Sprintf("ROLE{%q}", v))
 			}
 		} else {
 			return "", fmt.Errorf("Invalid roles type %T", c.Roles)

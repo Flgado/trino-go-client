@@ -187,26 +187,26 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 
-	if !*noCleanup && pool != nil {
-		if trinoResource != nil {
-			if err := pool.Purge(trinoResource); err != nil {
-				log.Fatalf("Could not purge resource: %s", err)
-			}
-		}
+	// if !*noCleanup && pool != nil {
+	// 	if trinoResource != nil {
+	// 		if err := pool.Purge(trinoResource); err != nil {
+	// 			log.Fatalf("Could not purge resource: %s", err)
+	// 		}
+	// 	}
 
-		if localStackResource != nil {
-			if err := pool.Purge(localStackResource); err != nil {
-				log.Fatalf("Could not purge LocalStack resource: %s", err)
-			}
-		}
+	// 	if localStackResource != nil {
+	// 		if err := pool.Purge(localStackResource); err != nil {
+	// 			log.Fatalf("Could not purge LocalStack resource: %s", err)
+	// 		}
+	// 	}
 
-		networkExists, networkID, err := networkExists(pool, TrinoNetwork)
-		if err == nil && networkExists {
-			if err := pool.Client.RemoveNetwork(networkID); err != nil {
-				log.Fatalf("Could not remove Docker network: %s", err)
-			}
-		}
-	}
+	// 	networkExists, networkID, err := networkExists(pool, TrinoNetwork)
+	// 	if err == nil && networkExists {
+	// 		if err := pool.Client.RemoveNetwork(networkID); err != nil {
+	// 			log.Fatalf("Could not remove Docker network: %s", err)
+	// 		}
+	// 	}
+	// }
 
 	os.Exit(code)
 }
@@ -1022,6 +1022,27 @@ func TestIntegrationNoResults(t *testing.T) {
 	}
 	if err = rows.Err(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRoleSupport(t *testing.T) {
+	config := Config{
+		ServerURI: *integrationServerFlag,
+		Roles:     map[string]string{"tpch": "role1"},
+	}
+
+	dns, err := config.FormatDSN()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db := integrationOpen(t, dns)
+	rows, err := db.Query("SELECT 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		t.Fatal(errors.New("Rows returned"))
 	}
 }
 
