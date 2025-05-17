@@ -254,8 +254,8 @@ The `queryTimeout` parameter sets a timeout for the query. If the query takes lo
 
 ```
 Type:           string
-Format:         roles=catalog1=role1;catalog2=role2
-Valid values:   semicolon-separated list of catalog-to-role assignments
+Format:         roles=catalog1=ROLE{role1},catalog2=ROLE{role2}
+Valid values:   A comma-separated list of catalog-to-role assignments, where each assignment maps a catalog to a role.
 Default:        empty
 ```
 The roles parameter defines authorization roles to assume for one or more catalogs during the Trino session.
@@ -272,7 +272,7 @@ c := &Config{
 }
 
 dsn, err := c.FormatDSN()
-// Result: https://foobar@localhost:8090?roles=catalog1%3Drole1%3Bcatalog2%3Drole2&session_properties=query_priority%3A1
+// Result: https://foobar@localhost:8090?roles=catalog1%3DROLE%7B%22role1%22%7D%2Ccatalog2%3DROLE%7B%22role2%22%7D&session_properties=query_priority%3A1&source=trino-go-client
 ```
 
 **Example using a string (applies to system catalog)**
@@ -285,7 +285,7 @@ c := &Config{
 }
 
 dsn, err := c.FormatDSN()
-// Result: https://foobar@localhost:8090?roles=system%3Dadmin&session_properties=query_priority%3A1
+// Result: https://foobar@localhost:8090?roles=system%3DROLE%7B%22admin%22%7D&session_properties=query_priority%3A1&source=trino-go-client
 ```
 
 

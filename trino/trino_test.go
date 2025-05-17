@@ -1160,7 +1160,7 @@ func TestTrinoRoleHeaderSent(t *testing.T) {
 	_, _ = db.Query("SHOW TABLES")
 	require.NoError(t, err)
 
-	assert.Equal(t, "catalog1=role1;catalog2=role2", receivedHeader, "expected X-Trino-Role header to be set")
+	assert.Equal(t, `catalog1=ROLE{"role1"},catalog2=ROLE{"role2"}`, receivedHeader, "expected X-Trino-Role header to be set")
 }
 
 func TestQueryFailure(t *testing.T) {
