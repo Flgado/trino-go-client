@@ -155,8 +155,6 @@ const (
 	mapKeySeparator   = ":"
 	mapEntrySeparator = ";"
 	mapCommaSeparator = ","
-	mapRolesSeparator = "="
-	sistemRole        = "system"
 )
 
 var (
@@ -198,7 +196,7 @@ type Config struct {
 	AccessToken                string            // An access token (JWT) for authentication (optional)
 	ForwardAuthorizationHeader bool              // Allow forwarding the `accessToken` named query parameter in the authorization header, overwriting the `AccessToken` option, if set (optional)
 	QueryTimeout               *time.Duration    // Configurable timeout for query (optional)
-	Roles                      interface{}       // Roles (optional)
+	Roles                      map[string]string // Roles (optional)
 }
 
 // FormatDSN returns a DSN string from the configuration.
@@ -222,14 +220,8 @@ func (c *Config) FormatDSN() (string, error) {
 
 	var roles []string
 	if c.Roles != nil {
-		if v, ok := c.Roles.(string); ok {
-			roles = append(roles, sistemRole+mapRolesSeparator+fmt.Sprintf("ROLE{%q}", v))
-		} else if v, ok := c.Roles.(map[string]string); ok {
-			for k, v := range v {
-				roles = append(roles, k+mapRolesSeparator+fmt.Sprintf("ROLE{%q}", v))
-			}
-		} else {
-			return "", fmt.Errorf("Invalid roles type %T", c.Roles)
+		for k, v := range c.Roles {
+			roles = append(roles, fmt.Sprintf("%s=ROLE{%q}", k, v))
 		}
 	}
 
@@ -411,6 +403,26 @@ func newConn(dsn string) (*Conn, error) {
 		queryTimeout = &d
 	}
 
+	var formatedRoles string
+	if rolesStr := query.Get("roles"); rolesStr != "" {
+		if !strings.Contains(rolesStr, "=ROLE{") {
+			roles := []string{}
+			rolesToFormat := strings.Split(rolesStr, ";")
+
+			for _, role := range rolesToFormat {
+				parts := strings.Split(role, ":")
+				if len(parts) != 2 {
+					return nil, fmt.Errorf("Invalid role format: %s", role)
+				}
+				roles = append(roles, fmt.Sprintf("%s=ROLE{%q}", parts[0], parts[1]))
+			}
+
+			formatedRoles = strings.Join(roles, mapCommaSeparator)
+		} else {
+			formatedRoles = rolesStr
+		}
+	}
+
 	c := &Conn{
 		baseURL:                    serverURL.Scheme + "://" + serverURL.Host,
 		httpClient:                 *httpClient,
@@ -421,7 +433,7 @@ func newConn(dsn string) (*Conn, error) {
 		useExplicitPrepare:         useExplicitPrepare,
 		forwardAuthorizationHeader: forwardAuthorizationHeader,
 		queryTimeout:               queryTimeout,
-		Roles:                      query.Get("roles"),
+		Roles:                      formatedRoles,
 	}
 
 	var user string

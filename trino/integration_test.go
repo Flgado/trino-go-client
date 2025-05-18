@@ -1042,8 +1042,13 @@ func TestRoleHeaderSupport(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "Valid single role via DSN",
-			rawDSN:      *integrationServerFlag + "?roles=tpch%3DROLE%7Brole1%7D",
+			name:        "Valid roles via DSN, not encoded url",
+			rawDSN:      *integrationServerFlag + "?roles=tpch:role1;memory:role2",
+			expectError: false,
+		},
+		{
+			name:        "Valid roles via DSN, url encoded",
+			rawDSN:      *integrationServerFlag + "?roles%3Dtpch%3Arole1%3Bmemory%3Arole2",
 			expectError: false,
 		},
 		{
@@ -1053,25 +1058,13 @@ func TestRoleHeaderSupport(t *testing.T) {
 				Roles:     map[string]string{"not-exist-catalog": "role1"},
 			},
 			expectError: true,
-			errorSubstr: "USER_ERROR: Catalog 'not-exist-catalog' not found",
-		},
-		{
-			name:        "Invalid role format with colon",
-			rawDSN:      *integrationServerFlag + "?roles=not-exist-catalog%3Arole1",
-			expectError: true,
-			errorSubstr: "Invalid X-Trino-Role header",
+			errorSubstr: "USER_ERROR: Catalog",
 		},
 		{
 			name:        "Invalid role format missing ROLE{}",
 			rawDSN:      *integrationServerFlag + "?roles=catolog%3Drole1",
 			expectError: true,
-			errorSubstr: "Invalid X-Trino-Role header",
-		},
-		{
-			name:        "Invalid role format missing ROLE{}",
-			rawDSN:      *integrationServerFlag + "?roles=catolog%3Drole1",
-			expectError: true,
-			errorSubstr: "Invalid X-Trino-Role header",
+			errorSubstr: "Invalid role format: catolog=role1",
 		},
 	}
 

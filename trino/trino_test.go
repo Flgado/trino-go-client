@@ -220,13 +220,13 @@ func TestFormatDSNWithRoles(t *testing.T) {
 			wantDSN: "https://foobar@localhost:8090?roles=catalog1%3DROLE%7B%22role1%22%7D%2Ccatalog2%3DROLE%7B%22role2%22%7D&session_properties=query_priority%3A1&source=trino-go-client",
 		},
 		{
-			name: "Default system role as string",
+			name: "Single catalog role",
 			config: &Config{
 				ServerURI:         "https://foobar@localhost:8090",
 				SessionProperties: map[string]string{"query_priority": "1"},
-				Roles:             "role1",
+				Roles:             map[string]string{"catalog1": "role1"},
 			},
-			wantDSN: "https://foobar@localhost:8090?roles=system%3DROLE%7B%22role1%22%7D&session_properties=query_priority%3A1&source=trino-go-client",
+			wantDSN: "https://foobar@localhost:8090?roles=catalog1%3DROLE%7B%22role1%22%7D&session_properties=query_priority%3A1&source=trino-go-client",
 		},
 	}
 

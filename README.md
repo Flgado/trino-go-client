@@ -253,17 +253,16 @@ The `queryTimeout` parameter sets a timeout for the query. If the query takes lo
 #### `roles`
 
 ```
-Type:           string
-Format:         roles=catalog1=ROLE{role1},catalog2=ROLE{role2}
-Valid values:   A comma-separated list of catalog-to-role assignments, where each assignment maps a catalog to a role.
+Type:           string  
+Format:         roles=catalog1:role1;catalog2=role2  
+Valid values:   A semicolon-separated list of catalog-to-role assignments, where each assignment maps a catalog to a role.  
 Default:        empty
 ```
 The roles parameter defines authorization roles to assume for one or more catalogs during the Trino session.
 
-You can assign roles either as a map of catalog-to-role pairs or a string. When a string is used, it applies the role to the `system` catalog by default.
+You can assign roles either as a map of catalog-to-role pairs or a string direcly in the dns connection.
 
 ##### Example
-
 ``` go
 c := &Config{
 	ServerURI:         "https://foobar@localhost:8090",
@@ -272,22 +271,7 @@ c := &Config{
 }
 
 dsn, err := c.FormatDSN()
-// Result: https://foobar@localhost:8090?roles=catalog1%3DROLE%7B%22role1%22%7D%2Ccatalog2%3DROLE%7B%22role2%22%7D&session_properties=query_priority%3A1&source=trino-go-client
 ```
-
-**Example using a string (applies to system catalog)**
-
-``` go
-c := &Config{
-	ServerURI:         "https://foobar@localhost:8090",
-	SessionProperties: map[string]string{"query_priority": "1"},
-	Roles:             "admin", // equivalent to map[string]string{"system": "admin"}
-}
-
-dsn, err := c.FormatDSN()
-// Result: https://foobar@localhost:8090?roles=system%3DROLE%7B%22admin%22%7D&session_properties=query_priority%3A1&source=trino-go-client
-```
-
 
 #### Examples
 
@@ -297,6 +281,11 @@ http://user@localhost:8080?source=hello&catalog=default&schema=foobar
 
 ```
 https://user@localhost:8443?session_properties=query_max_run_time=10m,query_priority=2
+```
+
+
+```
+http://user@localhost:8080?source=hello&catalog=default&schema=foobar&roles=catalog1:role1;catalog2:role2
 ```
 
 ## Data types
